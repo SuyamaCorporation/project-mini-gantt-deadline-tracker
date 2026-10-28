@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ミニ ガントチャート 期限管理</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+<div class="max-w-5xl mx-auto">
+  <h1 class="text-2xl font-bold mb-4 text-gray-800">ミニ ガントチャート 期限管理</h1>
+
+  <!-- Add Task Form -->
+  <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <h2 class="text-lg font-semibold mb-3 text-gray-700">タスク追加</h2>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+      <div class="col-span-2 md:col-span-1">
+        <label for="taskName" class="block text-sm text-gray-600 mb-1">タスク名</label>
+        <input id="taskName" type="text" class="w-full border rounded px-2 py-1 text-sm" placeholder="タスク名" aria-label="タスク名">
+      </div>
+      <div>
+        <label for="startDate" class="block text-sm text-gray-600 mb-1">開始日</label>
+        <input id="startDate" type="date" class="w-full border rounded px-2 py-1 text-sm" aria-label="開始日">
+      </div>
+      <div>
+        <label for="endDate" class="block text-sm text-gray-600 mb-1">終了日</label>
+        <input id="endDate" type="date" class="w-full border rounded px-2 py-1 text-sm" aria-label="終了日">
+      </div>
+      <div>
+        <label for="progress" class="block text-sm text-gray-600 mb-1">進捗%</label>
+        <input id="progress" type="number" min="0" max="100" value="0" class="w-full border rounded px-2 py-1 text-sm" aria-label="進捗パーセント">
+      </div>
+      <div class="flex items-end">
+        <button onclick="addTask()" class="w-full bg-blue-600 text-white rounded px-3 py-1 text-sm hover:bg-blue-700" aria-label="タスクを追加">追加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gantt Chart Canvas -->
+  <div class="bg-white rounded-lg shadow p-4 mb-4 overflow-x-auto">
+    <h2 class="text-lg font-semibold mb-3 text-gray-700">ガントチャート</h2>
+    <canvas id="ganttCanvas" class="border rounded" style="min-width:600px;"></canvas>
+  </div>
+
+  <!-- Task Table -->
+  <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-lg font-semibold text-gray-700">タスク一覧</h2>
+      <button onclick="exportJSON()" class="bg-green-600 text-white rounded px-3 py-1 text-sm hover:bg-green-700" aria-label="JSONエクスポート">JSON エクスポート</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50">
+            <th class="text-left p-2 border-b">タスク名</th>
+            <th class="text-left p-2 border-b">開始日</th>
+            <th class="text-left p-2 border-b">終了日</th>
+            <th class="text-left p-2 border-b">進捗%</th>
+            <th class="text-left p-2 border-b">操作</th>
+          </tr>
+        </thead>
+        <tbody id="taskTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+let tasks = [];
+
+function loadTasks() {
+  try {
+    tasks = JSON.parse(localStorage.getItem('gantt-tasks') || '[]');
+  } catch(e) { tasks = []; }
+}
+
+function saveTasks() {
+  localStorage.setItem('gantt-tasks', JSON.stringify(tasks));
+}
+
+function addTask() {
+  const name = document.getElementById('taskName').value.trim();
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+  const prog = parseInt(document.getElementById('progress').value) || 0;
+  if (!name || !start || !end) { alert('タスク名・開始日・終了日を入力してください'); return; }
+  if (start > end) { alert('開始日は終了日より前にしてください'); return; }
+  tasks.push({ id: Date.now(), name, start, end, progress: Math.min(100, Math.max(0, prog)) });
+  saveTasks();
+  renderTable();
+  drawGantt();
+  document.getElementById('taskName').value = '';
+}
+
+function deleteTask(id) {
+  tasks = tasks.filter(t => t.id !== id);
+  saveTasks();
+  renderTable();
+  drawGantt();
+}
+
+function updateProgress(id, val) {
+  const t = tasks.find(t => t.id === id);
+  if (t) { t.progress = Math.min(100, Math.max(0, parseInt(val) || 0)); saveTasks(); drawGantt(); }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('taskTableBody');
+  tbody.innerHTML = '';
+  tasks.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b hover:bg-gray-50';
+
+    const tdName = document.createElement('td');
+    tdName.className = 'p-2';
+    tdName.textContent = t.name;
+
+    const tdStart = document.createElement('td');
+    tdStart.className = 'p-2';
+    tdStart.textContent = t.start;
+
+    const tdEnd = document.createElement('td');
+    tdEnd.className = 'p-2';
+    tdEnd.textContent = t.end;
+
+    const tdProg = document.createElement('td');
+    tdProg.className = 'p-2';
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.min = '0';
+    inp.max = '100';
+    inp.value = t.progress;
+    inp.className = 'w-16 border rounded px-1 py-0.5 text-sm';
+    inp.setAttribute('aria-label', '進捗パーセント');
+    inp.onchange = () => { updateProgress(t.id, inp.value); };
+    tdProg.appendChild(inp);
+
+    const tdOp = document.createElement('td');
+    tdOp.className = 'p-2';
+    const btn = document.createElement('button');
+    btn.textContent = '削除';
+    btn.className = 'text-red-600 hover:text-red-800 text-sm';
+    btn.setAttribute('aria-label', '削除');
+    btn.onclick = () => deleteTask(t.id);
+    tdOp.appendChild(btn);
+
+    tr.appendChild(tdName);
+    tr.appendChild(tdStart);
+    tr.appendChild(tdEnd);
+    tr.appendChild(tdProg);
+    tr.appendChild(tdOp);
+    tbody.appendChild(tr);
+  });
+}
+
+function drawGantt() {
+  const canvas = document.getElementById('ganttCanvas');
+  const ctx = canvas.getContext('2d');
+  if (tasks.length === 0) {
+    canvas.width = 600;
+    canvas.height = 100;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('タスクを追加するとチャートが表示されます', 20, 55);
+    return;
+  }
+
+  const rowH = 40;
+  const labelW = 160;
+  const paddingTop = 50;
+  const paddingBottom = 20;
+
+  // Date range
+  const allDates = tasks.flatMap(t => [new Date(t.start), new Date(t.end)]);
+  let minDate = new Date(Math.min(...allDates));
+  let maxDate = new Date(Math.max(...allDates));
+  // Expand range a bit
+  minDate.setDate(minDate.getDate() - 2);
+  maxDate.setDate(maxDate.getDate() + 2);
+  const totalDays = Math.ceil((maxDate - minDate) / 86400000);
+
+  const chartW = Math.max(600, totalDays * 18);
+  canvas.width = labelW + chartW;
+  canvas.height = paddingTop + tasks.length * rowH + paddingBottom;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#f9fafb';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Header: dates
+  ctx.fillStyle = '#374151';
+  ctx.font = '11px sans-serif';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  for (let d = 0; d <= totalDays; d++) {
+    const dt = new Date(minDate.getTime() + d * 86400000);
+    const x = labelW + d * (chartW / totalDays);
+    if (dt.getDate() === 1 || d === 0) {
+      ctx.fillStyle = '#6b7280';
+      ctx.fillText(`${dt.getMonth()+1}/${dt.getDate()}`, x + 2, 20);
+    } else if (d % 5 === 0) {
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillText(`${dt.getDate()}`, x + 2, 20);
+    }
+    // Grid line
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, paddingTop);
+    ctx.lineTo(x, canvas.height - paddingBottom);
+    ctx.stroke();
+  }
+
+  // Today line
+  const todayOffset = (today - minDate) / 86400000;
+  if (todayOffset >= 0 && todayOffset <= totalDays) {
+    const todayX = labelW + todayOffset * (chartW / totalDays);
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(todayX, paddingTop - 10);
+    ctx.lineTo(todayX, canvas.height - paddingBottom);
+    ctx.stroke();
+    ctx.fillStyle = '#ef4444';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('今日', todayX + 2, paddingTop - 2);
+  }
+
+  // Tasks
+  tasks.forEach((t, i) => {
+    const y = paddingTop + i * rowH;
+    const barY = y + 8;
+    const barH = rowH - 16;
+
+    // Label
+    ctx.fillStyle = '#374151';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(t.name.substring(0, 18), 4, y + rowH / 2 + 4);
+
+    // Row bg
+    if (i % 2 === 0) {
+      ctx.fillStyle = '#f3f4f6';
+      ctx.fillRect(labelW, y, chartW, rowH);
+    }
+
+    const startD = (new Date(t.start) - minDate) / 86400000;
+    const endD = (new Date(t.end) - minDate) / 86400000+ 1;
+    const barX = labelW + startD * (chartW / totalDays);
+    const barW = (endD - startD) * (chartW / totalDays);
+
+    // Background bar
+    ctx.fillStyle = '#bfdbfe';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, 3);
+    ctx.fill();
+
+    // Progress bar
+    if (t.progress > 0) {
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW * t.progress / 100, barH, 3);
+      ctx.fill();
+    }
+
+    // Progress text
+    ctx.fillStyle = t.progress > 40 ? '#fff' : '#1e40af';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`${t.progress}%`, barX + 4, barY + barH / 2 + 4);
+  });
+}
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gantt-tasks.json';
+  a.click();
+}
+
+// Init
+loadTasks();
+renderTable();
+drawGantt();
+
+// Set default dates
+const now = new Date();
+const fmt = d => d.toISOString().slice(0,10);
+document.getElementById('startDate').value = fmt(now);
+const end = new Date(now); end.setDate(end.getDate() + 7);
+document.getElementById('endDate').value = fmt(end);
+</script>
+</body>
+</html>
